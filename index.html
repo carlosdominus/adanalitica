@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dominus — Ad Analytica</title>
+    <script>
+      /**
+       * Fix for "Cannot set property fetch of #<Window> which has only a getter"
+       * and "Cannot assign to read only property 'global' of object '#<Window>'"
+       * 
+       * Some libraries (like polyfills or older modules) try to assign to global.fetch
+       * or window.fetch. In some environments, these are read-only.
+       */
+      (function() {
+        if (typeof window !== 'undefined') {
+          // Create a proxy for the global object
+          var proxyGlobal = new Proxy(window, {
+            set: function(target, prop, value) {
+              if (prop === 'fetch') {
+                console.warn('Attempt to overwrite global fetch ignored to prevent crash.');
+                return true; // Claim success but do nothing
+              }
+              try {
+                target[prop] = value;
+              } catch (e) {
+                console.warn('Failed to set global property ' + String(prop) + ':', e);
+              }
+              return true;
+            },
+            get: function(target, prop) {
+              if (prop === 'global' || prop === 'globalThis' || prop === 'window' || prop === 'self') {
+                return proxyGlobal;
+              }
+              var value = target[prop];
+              if (typeof value === 'function') {
+                return value.bind(target);
+              }
+              return value;
+            }
+          });
+
+          // Define window.global with a getter/setter to prevent "read only property" errors
+          try {
+            Object.defineProperty(window, 'global', {
+              get: function() { return proxyGlobal; },
+              set: function(v) { 
+                console.warn('window.global assignment ignored to maintain proxy protection.');
+              },
+              configurable: true
+            });
+          } catch (e) {
+            // Fallback if defineProperty fails
+            window.global = proxyGlobal;
+          }
+
+          // Also try to protect window.fetch directly if possible
+          try {
+            var originalFetch = window.fetch;
+            Object.defineProperty(window, 'fetch', {
+              get: function() { return originalFetch; },
+              set: function(v) { 
+                console.warn('window.fetch assignment ignored to prevent crash.');
+              },
+              configurable: true
+            });
+          } catch (e) {
+            // If window.fetch is non-configurable, we can't do anything here,
+            // but the 'global' proxy above will handle cases where 'global' is used.
+          }
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
