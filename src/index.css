@@ -132,8 +132,35 @@ body {
   font-weight: 600 !important;
 }
 
+.sentiment-positive strong,
+.sentiment-positive em {
+  color: var(--accent) !important;
+  font-weight: 700 !important;
+}
+
 .sentiment-negative {
   color: #ff4e00 !important;
   font-weight: 600 !important;
+}
+
+.sentiment-negative strong,
+.sentiment-negative em {
+  color: #ff4e00 !important;
+  font-weight: 700 !important;
+}
+
+:root.light .sentiment-negative {
+  color: #D32F2F !important;
+}
+
+:root.light .sentiment-negative strong,
+:root.light .sentiment-negative em {
+  color: #D32F2F !important;
+}
+
+.markdown-body pre, .markdown-body code {
+  white-space: pre-wrap !important;
+  word-break: break-word !important;
+  overflow-wrap: break-word !important;
 }
 
