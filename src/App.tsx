@@ -23,8 +23,28 @@ import {
   ArrowRight,
   Download,
   ChevronDown,
-  Upload
+  Upload,
+  LogOut
 } from 'lucide-react';
+
+// Firebase imports
+import { auth, db } from './services/firebase';
+import { 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword, 
+  signOut, 
+  onAuthStateChanged, 
+  User as FirebaseUser 
+} from 'firebase/auth';
+import { 
+  collection, 
+  doc, 
+  setDoc, 
+  deleteDoc, 
+  onSnapshot, 
+  query, 
+  orderBy 
+} from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   BarChart, 
@@ -648,28 +668,49 @@ export default function App() {
   const [isFileLoading, setIsFileLoading] = useState(false);
   const [isTransFileLoading, setIsTransFileLoading] = useState(false);
 
-  // Load history and theme from local storage
-  useEffect(() => {
-    const savedHistory = localStorage.getItem('ad_analytica_history');
-    if (savedHistory) {
-      try {
-        setHistory(JSON.parse(savedHistory));
-      } catch (e) {
-        console.error("Failed to parse history", e);
-      }
-    }
+  // Auth and Firebase states
+  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
+  const [isAuthChecking, setIsAuthChecking] = useState(true);
+  const [passwordInput, setPasswordInput] = useState('');
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
+  // Monitor Auth state
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user);
+      setIsAuthChecking(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Sync history with Firestore in real-time
+  useEffect(() => {
+    if (!currentUser) {
+      setHistory([]);
+      return;
+    }
+    const q = query(collection(db, "analyses"), orderBy("timestamp", "desc"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list: AnalysisResult[] = [];
+      snapshot.forEach((doc) => {
+        list.push(doc.data() as AnalysisResult);
+      });
+      setHistory(list);
+    }, (err) => {
+      console.error("Erro ao sincronizar histórico com o Firestore:", err);
+    });
+    return () => unsubscribe();
+  }, [currentUser]);
+
+  // Load theme from local storage
+  useEffect(() => {
     const savedTheme = localStorage.getItem('ad_analytica_theme') as 'dark' | 'light';
     if (savedTheme) {
       setTheme(savedTheme);
       document.documentElement.classList.toggle('light', savedTheme === 'light');
     }
   }, []);
-
-  // Save history to local storage
-  useEffect(() => {
-    localStorage.setItem('ad_analytica_history', JSON.stringify(history));
-  }, [history]);
 
   // Save theme to local storage
   useEffect(() => {
@@ -695,6 +736,39 @@ export default function App() {
     return () => clearInterval(interval);
   }, [isLoading]);
 
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError(null);
+    setIsLoggingIn(true);
+
+    if (passwordInput !== 'Dominus1213!') {
+      setAuthError("Senha incorreta! Use a senha padrão do time para continuar.");
+      setIsLoggingIn(false);
+      return;
+    }
+
+    const email = "colaborador@dominus.site";
+
+    try {
+      await signInWithEmailAndPassword(auth, email, passwordInput);
+    } catch (err: any) {
+      if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password') {
+        // Automatically sign up if the user doesn't exist yet!
+        try {
+          await createUserWithEmailAndPassword(auth, email, passwordInput);
+        } catch (regErr: any) {
+          console.error("Auto registration error:", regErr);
+          setAuthError("Erro de credenciais ou rede. Tente novamente.");
+        }
+      } else {
+        console.error("Auth error:", err);
+        setAuthError("Ocorreu um erro ao realizar o login.");
+      }
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
   const handleAnalyze = async () => {
     if (!transcription.trim()) return;
 
@@ -710,10 +784,16 @@ export default function App() {
         timestamp: Date.now(),
       };
       
+      // Save to Firestore
+      const docRef = doc(db, "analyses", newAnalysis.id);
+      await setDoc(docRef, {
+        ...newAnalysis,
+        createdBy: currentUser?.email || 'anon'
+      });
+      
       // Jump to 100% before showing result
       setProgress(100);
       setTimeout(() => {
-        setHistory(prev => [newAnalysis, ...prev]);
         setCurrentAnalysis(newAnalysis);
         setTranscription('');
         setIsLoading(false);
@@ -726,7 +806,7 @@ export default function App() {
     }
   };
 
-  const handleImport = () => {
+  const handleImport = async () => {
     if (!importText.trim()) return;
     
     setIsLoading(true);
@@ -741,9 +821,15 @@ export default function App() {
         timestamp: Date.now(),
       };
       
+      // Save to Firestore
+      const docRef = doc(db, "analyses", newAnalysis.id);
+      await setDoc(docRef, {
+        ...newAnalysis,
+        createdBy: currentUser?.email || 'anon'
+      });
+      
       setProgress(100);
       setTimeout(() => {
-        setHistory(prev => [newAnalysis, ...prev]);
         setCurrentAnalysis(newAnalysis);
         setImportText('');
         setIsLoading(false);
@@ -770,9 +856,15 @@ export default function App() {
         timestamp: Date.now(),
       };
       
+      // Save to Firestore
+      const docRef = doc(db, "analyses", newAnalysis.id);
+      await setDoc(docRef, {
+        ...newAnalysis,
+        createdBy: currentUser?.email || 'anon'
+      });
+      
       setProgress(100);
       setTimeout(() => {
-        setHistory(prev => [newAnalysis, ...prev]);
         setCurrentAnalysis(newAnalysis);
         setImportText('');
         setIsFileLoading(false);
@@ -1064,11 +1156,18 @@ export default function App() {
     URL.revokeObjectURL(url);
   };
 
-  const deleteHistoryItem = (id: string, e: React.MouseEvent) => {
+  const deleteHistoryItem = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    setHistory(prev => prev.filter(item => item.id !== id));
-    if (currentAnalysis?.id === id) {
-      setCurrentAnalysis(null);
+    if (window.confirm("Deseja realmente excluir esta análise do histórico compartilhado?")) {
+      try {
+        await deleteDoc(doc(db, "analyses", id));
+        if (currentAnalysis?.id === id) {
+          setCurrentAnalysis(null);
+        }
+      } catch (err) {
+        console.error("Erro ao excluir do Firestore:", err);
+        setError("Não foi possível excluir o item do histórico.");
+      }
     }
   };
 
@@ -1091,6 +1190,88 @@ export default function App() {
       ctr: ad?.metrics?.ctr || 0,
     }));
   }, [currentAnalysis]);
+
+  if (isAuthChecking) {
+    return (
+      <div className="min-h-screen bg-dominus-black text-white flex flex-col items-center justify-center gap-4">
+        <div className="w-10 h-10 border-4 border-dominus-green border-t-transparent rounded-full animate-spin" />
+        <p className="text-xs text-dominus-gray font-bold tracking-wider uppercase animate-pulse">Carregando AdAnalytica...</p>
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    return (
+      <div className="min-h-screen bg-dominus-black text-white flex flex-col items-center justify-center p-6 relative overflow-hidden">
+        {/* Background Gradients */}
+        <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-dominus-green/5 rounded-full blur-[120px] pointer-events-none" />
+        <div className="absolute bottom-0 right-1/4 w-[500px] h-[500px] bg-dominus-green/5 rounded-full blur-[120px] pointer-events-none" />
+
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="w-full max-w-md bg-dominus-dark border border-white/5 rounded-3xl p-8 shadow-2xl relative z-10"
+        >
+          <div className="flex flex-col items-center text-center mb-8">
+            <img 
+              src="https://i.ibb.co/ynpT5hCf/logo-branca.webp" 
+              alt="Dominus" 
+              className="h-12 w-auto mb-6"
+              referrerPolicy="no-referrer"
+              crossOrigin="anonymous"
+            />
+            <h1 className="text-2xl font-display font-extrabold tracking-tight">
+              Ad<span className="text-dominus-green">Analytica</span>
+            </h1>
+            <p className="text-xs text-dominus-gray mt-2 font-semibold uppercase tracking-wider">
+              Portal do Colaborador • Dominus
+            </p>
+          </div>
+
+          <form onSubmit={handleLogin} className="space-y-6">
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-dominus-gray uppercase tracking-widest block">
+                Senha de Acesso
+              </label>
+              <input
+                type="password"
+                value={passwordInput}
+                onChange={(e) => setPasswordInput(e.target.value)}
+                placeholder="Digite a senha única"
+                className="w-full bg-dominus-black border border-white/10 rounded-2xl px-4 py-3.5 text-sm focus:outline-none focus:border-dominus-green/50 transition-colors placeholder:text-dominus-gray/60 text-white"
+                required
+              />
+            </div>
+
+            {authError && (
+              <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4 flex items-start gap-3">
+                <AlertCircle size={18} className="text-red-500 shrink-0 mt-0.5" />
+                <span className="text-xs text-red-400 font-medium">{authError}</span>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={isLoggingIn}
+              className="w-full bg-dominus-green hover:bg-dominus-green/90 text-dominus-black font-bold py-4 rounded-2xl transition-all duration-300 hover:shadow-[0_0_25px_rgba(0,210,122,0.3)] disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer border-0"
+            >
+              {isLoggingIn ? (
+                <>
+                  <Loader2 size={18} className="animate-spin" />
+                  <span>Entrando...</span>
+                </>
+              ) : (
+                <>
+                  <span>Entrar na Plataforma</span>
+                  <ArrowRight size={18} />
+                </>
+              )}
+            </button>
+          </form>
+        </motion.div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -1123,12 +1304,20 @@ export default function App() {
           label="Ajustes"
         />
 
-        <div className="mt-auto">
+        <div className="mt-auto flex flex-col items-center gap-3">
           <button 
             onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
             className="p-3 rounded-xl hover:bg-white/5 transition-colors text-dominus-gray hover:text-white"
+            title="Alternar Tema"
           >
             {theme === 'dark' ? <Sun size={24} /> : <Moon size={24} />}
+          </button>
+          <button 
+            onClick={() => signOut(auth)}
+            className="p-3 rounded-xl hover:bg-red-500/10 text-red-500 hover:text-red-400 transition-colors"
+            title="Sair da Conta"
+          >
+            <LogOut size={24} />
           </button>
         </div>
       </div>
@@ -1142,7 +1331,7 @@ export default function App() {
           referrerPolicy="no-referrer"
           crossOrigin="anonymous"
         />
-        <div className="flex gap-4">
+        <div className="flex gap-4 items-center">
           <button onClick={() => setView('dashboard')} className={cn("p-2", view === 'dashboard' ? "text-dominus-green" : "text-dominus-gray")}>
             <LayoutDashboard size={20} />
           </button>
@@ -1151,6 +1340,9 @@ export default function App() {
           </button>
           <button onClick={() => setView('settings')} className={cn("p-2", view === 'settings' ? "text-dominus-green" : "text-dominus-gray")}>
             <SettingsIcon size={20} />
+          </button>
+          <button onClick={() => signOut(auth)} className="p-2 text-red-500 hover:text-red-400">
+            <LogOut size={20} />
           </button>
         </div>
       </header>
@@ -1899,6 +2091,31 @@ export default function App() {
                       >
                         <Moon size={20} />
                       </button>
+                    </div>
+                  </div>
+
+                  <div className="pt-8 border-t border-white/5 space-y-4">
+                    <h3 className="font-bold">Gerenciamento de Conta</h3>
+                    <div className="bg-dominus-black/40 border border-white/5 rounded-2xl p-5 space-y-3">
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-dominus-gray">Colaborador:</span>
+                        <span className="font-mono text-white font-semibold">{currentUser?.email}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-dominus-gray">Histórico Compartilhado:</span>
+                        <span className="text-dominus-green font-semibold flex items-center gap-1.5">
+                          <span className="w-2 h-2 rounded-full bg-dominus-green animate-pulse" />
+                          Nuvem Sincronizada (Firebase)
+                        </span>
+                      </div>
+                      <div className="pt-2">
+                        <button
+                          onClick={() => signOut(auth)}
+                          className="w-full bg-red-500/10 hover:bg-red-500/20 text-red-400 font-bold py-3 px-4 rounded-xl text-xs transition-colors duration-200"
+                        >
+                          Sair da Conta (Logout)
+                        </button>
+                      </div>
                     </div>
                   </div>
 

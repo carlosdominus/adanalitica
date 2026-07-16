@@ -1,0 +1,33 @@
+{
+  "collections": {
+    "analyses": {
+      "description": "Lista de análises de atas de reuniões e campanhas de anúncios geradas ou importadas pelos colaboradores",
+      "fields": {
+        "id": {
+          "type": "string",
+          "description": "ID único da análise"
+        },
+        "timestamp": {
+          "type": "number",
+          "description": "Carimbo de data/hora de criação da análise"
+        },
+        "markdown": {
+          "type": "string",
+          "description": "Conteúdo markdown do resumo e insights gerados"
+        },
+        "ads": {
+          "type": "array",
+          "description": "Lista de anúncios com suas respectivas métricas e status"
+        },
+        "summary": {
+          "type": "map",
+          "description": "Estrutura contendo o insight principal, próximos testes e ações pendentes"
+        },
+        "createdBy": {
+          "type": "string",
+          "description": "E-mail ou ID do usuário que criou a análise"
+        }
+      }
+    }
+  }
+}
