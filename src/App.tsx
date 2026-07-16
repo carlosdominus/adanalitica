@@ -65,6 +65,34 @@ function getTextFromChildren(children: any): string {
 function getSentimentColorClass(text: string): string {
   if (!text) return "";
   const lower = text.toLowerCase();
+
+  // Disable sentiment coloring for participant names and their specific text-based feedback/analyses
+  // Also disable for consensus ("concenso") and hypotheses as they have special marker highlights
+  if (
+    lower.includes("participante") ||
+    lower.includes("gestor") ||
+    lower.includes("editor") ||
+    lower.includes("copy") ||
+    lower.includes("designer") ||
+    lower.includes("tráfego") ||
+    lower.includes("trafego") ||
+    lower.includes("análise do") ||
+    lower.includes("analise do") ||
+    lower.includes("análise de") ||
+    lower.includes("analise de") ||
+    lower.includes("análise da") ||
+    lower.includes("analise da") ||
+    lower.includes("análise dos") ||
+    lower.includes("analise dos") ||
+    lower.includes("análise das") ||
+    lower.includes("analise das") ||
+    lower.includes("consenso") ||
+    lower.includes("concenso") ||
+    lower.includes("hipotese") ||
+    lower.includes("hipótese")
+  ) {
+    return "";
+  }
   
   // 1. If it doesn't have data, it must be white (return empty)
   if (
@@ -302,6 +330,31 @@ function markdownToHtml(markdown: string): string {
       const text = trimmed.replace(/^#+\s*/, '');
       const fontSize = level === 1 ? '24px' : level === 2 ? '20px' : '16px';
       return suffix + `<h${level} style="color: #00D27A; font-family: 'Outfit', sans-serif; font-weight: 700; margin-top: 24px; margin-bottom: 12px; font-size: ${fontSize};">${text}</h${level}>`;
+    }
+
+    const lowerTrimmed = trimmed.toLowerCase();
+    const isConsenso = lowerTrimmed.includes("consenso") || lowerTrimmed.includes("concenso");
+    const isHipotese = lowerTrimmed.includes("hipotese") || lowerTrimmed.includes("hipótese");
+
+    if (isConsenso || isHipotese) {
+      let suffix = '';
+      if (inList) {
+        inList = false;
+        suffix = '</ul>';
+      }
+      
+      const isBullet = trimmed.startsWith('- ') || trimmed.startsWith('* ');
+      const textOnly = isBullet ? trimmed.replace(/^[-*]\s*/, '') : trimmed;
+      
+      const formatted = textOnly
+        .replace(/\*\*(.*?)\*\*/g, '<strong style="color: inherit !important;">$1</strong>')
+        .replace(/\*(.*?)\*/g, '<em style="color: inherit !important;">$1</em>');
+      
+      if (isConsenso) {
+        return suffix + `<p style="background-color: #004D2E !important; color: #FFFFFF !important; border-left: 4px solid #00D27A !important; padding: 10px 16px !important; border-radius: 0 12px 12px 0 !important; margin: 12px 0 !important; font-weight: 600 !important; line-height: 1.6; display: block !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important;">${formatted}</p>`;
+      } else {
+        return suffix + `<p style="background-color: #00D27A !important; color: #0A0A0A !important; border-left: 4px solid #FFFFFF !important; padding: 10px 16px !important; border-radius: 0 12px 12px 0 !important; margin: 12px 0 !important; font-weight: 800 !important; line-height: 1.6; display: block !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important;">${formatted}</p>`;
+      }
     }
     
     // List Items
@@ -589,8 +642,11 @@ export default function App() {
   
   const dashboardRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const transFileInputRef = useRef<HTMLInputElement>(null);
   const [dragActive, setDragActive] = useState(false);
+  const [transDragActive, setTransDragActive] = useState(false);
   const [isFileLoading, setIsFileLoading] = useState(false);
+  const [isTransFileLoading, setIsTransFileLoading] = useState(false);
 
   // Load history and theme from local storage
   useEffect(() => {
@@ -726,6 +782,21 @@ export default function App() {
       setError(errorMessage);
       console.error(err);
       setIsFileLoading(false);
+    }
+  };
+
+  const handleTransFileSelect = async (file: File) => {
+    setIsTransFileLoading(true);
+    setError(null);
+    try {
+      const text = await parseFile(file);
+      setTranscription(text);
+      setIsTransFileLoading(false);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Erro ao processar o arquivo de transcrição.';
+      setError(errorMessage);
+      console.error(err);
+      setIsTransFileLoading(false);
     }
   };
 
@@ -1253,11 +1324,68 @@ export default function App() {
 
                       {inputMode === 'generate' ? (
                         <div className="space-y-6">
+                          {/* File Dropzone for Transcription */}
+                          <div
+                            onDragEnter={(e) => { e.preventDefault(); setTransDragActive(true); }}
+                            onDragLeave={(e) => { e.preventDefault(); setTransDragActive(false); }}
+                            onDragOver={(e) => { e.preventDefault(); setTransDragActive(true); }}
+                            onDrop={async (e) => {
+                              e.preventDefault();
+                              setTransDragActive(false);
+                              if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                                handleTransFileSelect(e.dataTransfer.files[0]);
+                              }
+                            }}
+                            onClick={() => transFileInputRef.current?.click()}
+                            className={cn(
+                              "border-2 border-dashed rounded-2xl p-6 flex flex-col items-center justify-center gap-3 cursor-pointer transition-all bg-dominus-black/20",
+                              transDragActive 
+                                ? "border-dominus-green bg-dominus-green/5 shadow-[0_0_20px_rgba(0,210,122,0.1)]" 
+                                : "border-white/10 hover:border-white/20 hover:bg-white/5"
+                            )}
+                          >
+                            <input
+                              ref={transFileInputRef}
+                              type="file"
+                              accept=".doc,.docx,.pdf,.md,.txt"
+                              onChange={(e) => {
+                                if (e.target.files && e.target.files[0]) {
+                                  handleTransFileSelect(e.target.files[0]);
+                                }
+                              }}
+                              className="hidden"
+                            />
+                            {isTransFileLoading ? (
+                              <div className="flex flex-col items-center gap-2">
+                                <div className="w-8 h-8 border-2 border-dominus-green border-t-transparent rounded-full animate-spin" />
+                                <span className="text-xs text-dominus-gray font-bold">Lendo transcrição...</span>
+                              </div>
+                            ) : (
+                              <div className="flex flex-col items-center text-center gap-1.5">
+                                <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center text-dominus-green">
+                                  <Upload size={20} />
+                                </div>
+                                <p className="text-xs font-semibold text-white">
+                                  Arraste ou clique para carregar a transcrição (.doc, .docx, .pdf, .md, .txt)
+                                </p>
+                                <p className="text-[10px] text-dominus-gray">
+                                  O texto extraído preencherá automaticamente a área abaixo.
+                                </p>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-4 my-2">
+                            <div className="h-px bg-white/5 flex-1" />
+                            <span className="text-[10px] font-bold text-dominus-gray uppercase tracking-widest">ou digite/cole o texto abaixo</span>
+                            <div className="h-px bg-white/5 flex-1" />
+                          </div>
+
                           <textarea
                             value={transcription}
                             onChange={(e) => setTranscription(e.target.value)}
                             placeholder="Cole a transcrição da call aqui para processar com Inteligência Artificial..."
-                            className="w-full min-h-[300px] bg-dominus-black/50 border border-white/5 rounded-2xl p-6 focus:outline-none focus:border-dominus-green/50 transition-colors font-mono text-sm leading-relaxed placeholder:text-dominus-gray placeholder:opacity-80 text-white"
+                            className="w-full min-h-[250px] bg-dominus-black/50 border border-white/5 rounded-2xl p-6 focus:outline-none focus:border-dominus-green/50 transition-colors font-mono text-sm leading-relaxed placeholder:text-dominus-gray placeholder:opacity-80 text-white"
                           />
                           <div className="flex justify-end">
                             <button
@@ -1392,6 +1520,32 @@ export default function App() {
                               components={{
                                 li: ({ node, children, ...props }) => {
                                   const textContent = getTextFromChildren(children);
+                                  const lower = textContent.toLowerCase();
+                                  const isConsenso = lower.includes("consenso") || lower.includes("concenso");
+                                  const isHipotese = lower.includes("hipotese") || lower.includes("hipótese");
+                                  
+                                  if (isConsenso) {
+                                    return (
+                                      <li 
+                                        className="bg-[#004D2E] text-white border-l-4 border-dominus-green px-4 py-3 rounded-r-xl my-3 font-semibold shadow-[0_4px_12px_rgba(0,0,0,0.2)] list-none" 
+                                        {...props}
+                                      >
+                                        {children}
+                                      </li>
+                                    );
+                                  }
+                                  
+                                  if (isHipotese) {
+                                    return (
+                                      <li 
+                                        className="bg-dominus-green text-dominus-black border-l-4 border-white px-4 py-3 rounded-r-xl my-3 font-extrabold shadow-[0_4px_12px_rgba(0,210,122,0.15)] list-none" 
+                                        {...props}
+                                      >
+                                        {children}
+                                      </li>
+                                    );
+                                  }
+
                                   const sentimentClass = getSentimentColorClass(textContent);
                                   return (
                                     <li className={sentimentClass} {...props}>
@@ -1401,6 +1555,32 @@ export default function App() {
                                 },
                                 p: ({ node, children, ...props }) => {
                                   const textContent = getTextFromChildren(children);
+                                  const lower = textContent.toLowerCase();
+                                  const isConsenso = lower.includes("consenso") || lower.includes("concenso");
+                                  const isHipotese = lower.includes("hipotese") || lower.includes("hipótese");
+                                  
+                                  if (isConsenso) {
+                                    return (
+                                      <p 
+                                        className="bg-[#004D2E] text-white border-l-4 border-dominus-green px-4 py-3 rounded-r-xl my-3 font-semibold shadow-[0_4px_12px_rgba(0,0,0,0.2)]" 
+                                        {...props}
+                                      >
+                                        {children}
+                                      </p>
+                                    );
+                                  }
+                                  
+                                  if (isHipotese) {
+                                    return (
+                                      <p 
+                                        className="bg-dominus-green text-dominus-black border-l-4 border-white px-4 py-3 rounded-r-xl my-3 font-extrabold shadow-[0_4px_12px_rgba(0,210,122,0.15)]" 
+                                        {...props}
+                                      >
+                                        {children}
+                                      </p>
+                                    );
+                                  }
+
                                   const sentimentClass = getSentimentColorClass(textContent);
                                   return (
                                     <p className={sentimentClass} {...props}>
