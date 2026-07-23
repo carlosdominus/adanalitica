@@ -591,15 +591,6 @@ function parseImportedAta(rawText: string): Omit<AnalysisResult, 'id' | 'timesta
   }
   
   let finalAds = ads;
-  if (finalAds.length === 0) {
-    // Default fallback ads so charts aren't blank
-    finalAds = [
-      { name: 'Ad 017', fullName: 'Ad 017 — Controle Padrão', status: 'Ativo', metrics: { gasto: 900, vendas: 5, roas: 1.3, ic: 8, cpi: 15, cpc: 1.2, ctr: 2.3, cpm: 22, conversao: 2.5 } },
-      { name: 'Ad 21.1', fullName: 'Ad 21.1 — Formato de Briga / Vídeos de Barraco', status: 'Ativo', metrics: { gasto: 726, vendas: 9, roas: 1.72, ic: 12, cpi: 11, cpc: 1.34, ctr: 1.41, cpm: 19, conversao: 3.1 } },
-      { name: 'Ad 21.2', fullName: 'Ad 21.2 — Noiva Chorando / Relato de Traição', status: 'Ativo', metrics: { gasto: 650, vendas: 7, roas: 1.55, ic: 10, cpi: 13, cpc: 1.25, ctr: 2.10, cpm: 21, conversao: 2.8 } },
-      { name: 'Ad 35', fullName: 'Ad 35 — Podcast de Análise e Mecanismo', status: 'Ativo', metrics: { gasto: 1151, vendas: 13, roas: 1.85, ic: 18, cpi: 9, cpc: 0.57, ctr: 3.10, cpm: 18, conversao: 4.2 } }
-    ];
-  }
   
   return {
     markdown: rawText,
@@ -690,15 +681,55 @@ export default function App() {
       setHistory([]);
       return;
     }
-    const q = query(collection(db, "analyses"), orderBy("timestamp", "desc"));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    const unsubscribe = onSnapshot(collection(db, "analyses"), (snapshot) => {
       const list: AnalysisResult[] = [];
-      snapshot.forEach((doc) => {
-        list.push(doc.data() as AnalysisResult);
+      snapshot.forEach((docSnap) => {
+        let data = docSnap.data();
+        // If data was saved as raw Firestore REST payload with fields wrapper
+        if (data.fields && typeof data.fields === 'object') {
+          const extracted: Record<string, any> = {};
+          for (const [key, valObj] of Object.entries(data.fields as Record<string, any>)) {
+            if (valObj && typeof valObj === 'object') {
+              extracted[key] = valObj.stringValue ?? valObj.integerValue ?? valObj.doubleValue ?? valObj.booleanValue ?? valObj;
+            }
+          }
+          data = { ...data, ...extracted };
+        }
+
+        const rawTs = data.timestamp;
+        const timestamp = typeof rawTs === 'number' ? rawTs : (Number(rawTs) || Date.now());
+        
+        const summaryObj = typeof data.summary === 'object' && data.summary !== null ? data.summary : {};
+        const insightText = summaryObj.insight || summaryObj.keyInsight || summaryObj.key_insight || data.insight || data.description || (typeof data.summary === 'string' ? data.summary : 'Análise da Reunião');
+
+        const summary = {
+          insight: insightText,
+          nextTests: Array.isArray(summaryObj.nextTests) ? summaryObj.nextTests : (summaryObj.nextTests ? [summaryObj.nextTests] : []),
+          pending: Array.isArray(summaryObj.pending) ? summaryObj.pending : [],
+        };
+
+        let rawMarkdown = data.markdown || data.transcription || data.content || data.text || '';
+        if (!rawMarkdown) {
+          const possibleKey = Object.keys(data).find(k => k.includes('ATA') || k.includes('Call de Análise') || k.includes('markdown'));
+          if (possibleKey) rawMarkdown = possibleKey;
+        }
+
+        const parsedData = rawMarkdown ? parseImportedAta(rawMarkdown) : { ads: [] };
+        const adsList = (Array.isArray(data.ads) && data.ads.length > 0) ? data.ads : parsedData.ads;
+
+        list.push({
+          id: docSnap.id || data.id || String(timestamp),
+          timestamp,
+          markdown: rawMarkdown,
+          ads: adsList,
+          summary,
+        });
       });
+
+      list.sort((a, b) => b.timestamp - a.timestamp);
       setHistory(list);
     }, (err) => {
-      console.error("Erro ao sincronizar histórico com o Firestore:", err);
+      console.error("Erro ao synchronizar histórico com o Firestore:", err);
     });
     return () => unsubscribe();
   }, [currentUser]);
@@ -1158,16 +1189,26 @@ export default function App() {
 
   const deleteHistoryItem = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (window.confirm("Deseja realmente excluir esta análise do histórico compartilhado?")) {
-      try {
-        await deleteDoc(doc(db, "analyses", id));
-        if (currentAnalysis?.id === id) {
-          setCurrentAnalysis(null);
-        }
-      } catch (err) {
-        console.error("Erro ao excluir do Firestore:", err);
-        setError("Não foi possível excluir o item do histórico.");
+    try {
+      await deleteDoc(doc(db, "analyses", id));
+      setHistory(prev => prev.filter(item => item.id !== id));
+      if (currentAnalysis?.id === id) {
+        setCurrentAnalysis(null);
       }
+    } catch (err) {
+      console.error("Erro ao excluir do Firestore:", err);
+      setError("Não foi possível excluir o item do histórico.");
+    }
+  };
+
+  const clearAllHistory = async () => {
+    try {
+      await Promise.all(history.map(item => deleteDoc(doc(db, "analyses", item.id))));
+      setHistory([]);
+      setCurrentAnalysis(null);
+    } catch (err) {
+      console.error("Erro ao limpar histórico:", err);
+      setError("Não foi possível limpar o histórico.");
     }
   };
 
@@ -1971,9 +2012,20 @@ export default function App() {
                 exit={{ opacity: 0, y: -20 }}
                 className="space-y-8"
               >
-                <h2 className="text-4xl font-display font-bold tracking-tight">
-                  Histórico de <span className="text-dominus-green">Análises</span>
-                </h2>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <h2 className="text-4xl font-display font-bold tracking-tight">
+                    Histórico de <span className="text-dominus-green">Análises</span>
+                  </h2>
+                  {history.length > 0 && (
+                    <button
+                      onClick={clearAllHistory}
+                      className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 text-xs font-bold transition-all w-fit"
+                    >
+                      <Trash2 size={15} />
+                      Limpar Todo o Histórico
+                    </button>
+                  )}
+                </div>
 
                 {history.length === 0 ? (
                   <div className="dominus-card p-20 text-center opacity-30">
@@ -2012,7 +2064,7 @@ export default function App() {
                         </div>
                         <h3 className="text-lg font-bold mb-2 line-clamp-1">{extractMeetingTitle(item.markdown)}</h3>
                         <p className="text-sm text-dominus-gray line-clamp-2 mb-4 italic">
-                          "{item.summary.insight}"
+                          "{item.summary?.insight || 'Análise da Reunião'}"
                         </p>
                         
                         {/* Participants section */}
@@ -2042,8 +2094,8 @@ export default function App() {
 
                         <div className="flex items-center justify-between border-t border-white/5 pt-3 mt-3">
                           <span className="text-xs text-dominus-gray flex items-center gap-1.5 font-semibold">
-                            <span className="w-2 h-2 rounded-full bg-dominus-green" />
-                            {item.ads.length} {item.ads.length === 1 ? 'Ad analisado' : 'Ads analisados'}
+                            <span className={cn("w-2 h-2 rounded-full", item.ads.length > 0 ? "bg-dominus-green" : "bg-dominus-gray/40")} />
+                            {item.ads.length === 0 ? 'Nenhum ad analisado' : `${item.ads.length} ${item.ads.length === 1 ? 'Ad analisado' : 'Ads analisados'}`}
                           </span>
                           <ArrowRight size={16} className="text-dominus-gray group-hover:text-dominus-green group-hover:translate-x-1 transition-all" />
                         </div>
