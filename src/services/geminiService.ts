@@ -188,4 +188,100 @@ export async function analyzeCallTranscription(transcription: string) {
   }
 }
 
+export async function transcribeAndAnalyzeAudio(file: File) {
+  try {
+    const formData = new FormData();
+    formData.append("file", file, file.name || "audio.webm");
+    formData.append("audio", file, file.name || "audio.webm");
+    formData.append("data", file, file.name || "audio.webm");
+
+    const response = await fetch("https://nen.auto-jornada.space/webhook/recebe-audio-arquivowebm", {
+      method: "POST",
+      headers: {
+        "Accept": "application/json, text/plain, */*",
+      },
+      body: formData,
+    });
+
+    const responseText = await response.text();
+
+    if (!response.ok) {
+      console.error("Audio webhook error response:", responseText);
+      throw new Error(`Erro ao enviar áudio para o webhook (${response.status}): ${responseText || response.statusText}`);
+    }
+
+    let data;
+    try {
+      data = JSON.parse(responseText);
+    } catch (e) {
+      data = { markdown: responseText };
+    }
+
+    const result = Array.isArray(data) ? data[0] : (data.data || data);
+
+    const extractText = (obj: any): string => {
+      if (!obj) return "";
+      if (typeof obj === 'string') {
+        let trimmed = obj.trim();
+        if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+          try {
+            const parsed = JSON.parse(trimmed);
+            return extractText(parsed);
+          } catch (e) {}
+        }
+        return obj;
+      }
+      if (typeof obj === 'object') {
+        if (obj.markdown) return extractText(obj.markdown);
+        if (obj.output) return extractText(obj.output);
+        if (obj.content) return extractText(obj.content);
+        if (obj.text) return extractText(obj.text);
+        if (obj.transcription) return extractText(obj.transcription);
+        if (obj.ata_download && obj.ata_download.content) return extractText(obj.ata_download.content);
+        return JSON.stringify(obj, null, 2);
+      }
+      return String(obj);
+    };
+
+    let adsList: any[] = [];
+    if (result?.ads && Array.isArray(result.ads)) {
+      adsList = result.ads;
+    } else if (data?.ads && Array.isArray(data.ads)) {
+      adsList = data.ads;
+    }
+
+    let rawMarkdown = extractText(result?.markdown || result?.output || result?.transcription || result || data);
+
+    if (typeof rawMarkdown === 'string') {
+      try {
+        const firstTry = JSON.parse(rawMarkdown);
+        if (firstTry && typeof firstTry === 'object') {
+          if (firstTry.output) rawMarkdown = String(firstTry.output);
+          else if (firstTry.markdown) rawMarkdown = String(firstTry.markdown);
+          else if (firstTry.ata_download?.content) rawMarkdown = String(firstTry.ata_download.content);
+          else if (firstTry.content) rawMarkdown = String(firstTry.content);
+        }
+      } catch (e) {}
+
+      rawMarkdown = rawMarkdown
+        .replace(/\\n/g, '\n')
+        .replace(/\\r/g, '')
+        .replace(/\\"/g, '"');
+    }
+
+    return {
+      markdown: rawMarkdown || "Áudio processado e transcrito com sucesso via n8n.",
+      ads: adsList,
+      summary: {
+        insight: result?.summary?.insight || "Transcrição de áudio concluída via n8n.",
+        nextTests: Array.isArray(result?.summary?.nextTests) ? result.summary.nextTests : ["Escalar criativos", "Testar novos ganchos de vídeo"],
+        pending: Array.isArray(result?.summary?.pending) ? result.summary.pending : ["Verificar UTMs", "Atualizar contas de anúncio"]
+      }
+    };
+  } catch (error) {
+    console.error("Error sending audio to webhook:", error);
+    throw error;
+  }
+}
+
 

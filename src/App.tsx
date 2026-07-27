@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { analyzeCallTranscription } from './services/geminiService';
+import { analyzeCallTranscription, transcribeAndAnalyzeAudio } from './services/geminiService';
 import Markdown from 'react-markdown';
 import { 
   ClipboardCopy, 
@@ -24,7 +24,10 @@ import {
   Download,
   ChevronDown,
   Upload,
-  LogOut
+  LogOut,
+  Mic,
+  FileAudio,
+  Volume2
 } from 'lucide-react';
 
 // Firebase imports
@@ -648,14 +651,17 @@ export default function App() {
   const [progress, setProgress] = useState(0);
   const [isExporting, setIsExporting] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
-  const [inputMode, setInputMode] = useState<'generate' | 'import'>('generate');
+  const [inputMode, setInputMode] = useState<'transcribe' | 'generate' | 'import'>('transcribe');
   const [importText, setImportText] = useState('');
+  const [audioFile, setAudioFile] = useState<File | null>(null);
   
   const dashboardRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const transFileInputRef = useRef<HTMLInputElement>(null);
+  const audioFileInputRef = useRef<HTMLInputElement>(null);
   const [dragActive, setDragActive] = useState(false);
   const [transDragActive, setTransDragActive] = useState(false);
+  const [audioDragActive, setAudioDragActive] = useState(false);
   const [isFileLoading, setIsFileLoading] = useState(false);
   const [isTransFileLoading, setIsTransFileLoading] = useState(false);
 
@@ -920,6 +926,43 @@ export default function App() {
       setError(errorMessage);
       console.error(err);
       setIsTransFileLoading(false);
+    }
+  };
+
+  const handleAudioSend = async (fileParam?: File) => {
+    const fileToSend = fileParam || audioFile;
+    if (!fileToSend) return;
+
+    setIsLoading(true);
+    setError(null);
+    try {
+      const result = await transcribeAndAnalyzeAudio(fileToSend);
+      const sanitizedMarkdown = sanitizeMarkdown(result.markdown);
+      const newAnalysis: AnalysisResult = {
+        ...result,
+        markdown: sanitizedMarkdown,
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+      };
+      
+      // Save to Firestore
+      const docRef = doc(db, "analyses", newAnalysis.id);
+      await setDoc(docRef, {
+        ...newAnalysis,
+        createdBy: currentUser?.email || 'anon'
+      });
+      
+      setProgress(100);
+      setTimeout(() => {
+        setCurrentAnalysis(newAnalysis);
+        setAudioFile(null);
+        setIsLoading(false);
+      }, 500);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Erro ao processar o áudio no webhook.';
+      setError(errorMessage);
+      console.error(err);
+      setIsLoading(false);
     }
   };
 
@@ -1506,10 +1549,17 @@ export default function App() {
                           animate={{ opacity: [0.4, 1, 0.4] }}
                           transition={{ duration: 2, repeat: Infinity }}
                         >
-                          {progress < 30 ? "Lendo transcrição..." : 
-                           progress < 60 ? "Extraindo métricas de ads..." : 
-                           progress < 85 ? "Gerando conclusões da equipe..." : 
-                           "Finalizando ATA estruturada..."}
+                          {inputMode === 'transcribe' ? (
+                            progress < 30 ? "Enviando áudio (.webm) ao webhook..." : 
+                            progress < 60 ? "Transcrevendo áudio com Inteligência..." : 
+                            progress < 85 ? "Mapeando métricas, participantes e falas..." : 
+                            "Finalizando e salvando no histórico..."
+                          ) : (
+                            progress < 30 ? "Lendo transcrição..." : 
+                            progress < 60 ? "Extraindo métricas de ads..." : 
+                            progress < 85 ? "Gerando conclusões da equipe..." : 
+                            "Finalizando ATA estruturada..."
+                          )}
                         </motion.span>
                         <span>{Math.floor(progress)}%</span>
                       </div>
@@ -1529,11 +1579,23 @@ export default function App() {
                         </div>
                         
                         {/* Selector Tabs */}
-                        <div className="flex items-center bg-dominus-black p-1 rounded-xl border border-white/5">
+                        <div className="flex items-center bg-dominus-black p-1 rounded-xl border border-white/5 gap-1 overflow-x-auto">
+                          <button
+                            onClick={() => setInputMode('transcribe')}
+                            className={cn(
+                              "px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap",
+                              inputMode === 'transcribe' 
+                                ? "bg-dominus-green text-dominus-black shadow-lg" 
+                                : "text-dominus-gray hover:text-white"
+                            )}
+                          >
+                            <Mic size={14} />
+                            <span>Transcrever Áudio (.webm)</span>
+                          </button>
                           <button
                             onClick={() => setInputMode('generate')}
                             className={cn(
-                              "px-4 py-2 rounded-lg text-xs font-bold transition-all",
+                              "px-4 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap",
                               inputMode === 'generate' 
                                 ? "bg-dominus-green text-dominus-black shadow-lg" 
                                 : "text-dominus-gray hover:text-white"
@@ -1544,7 +1606,7 @@ export default function App() {
                           <button
                             onClick={() => setInputMode('import')}
                             className={cn(
-                              "px-4 py-2 rounded-lg text-xs font-bold transition-all",
+                              "px-4 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap",
                               inputMode === 'import' 
                                 ? "bg-dominus-green text-dominus-black shadow-lg" 
                                 : "text-dominus-gray hover:text-white"
@@ -1555,7 +1617,104 @@ export default function App() {
                         </div>
                       </div>
 
-                      {inputMode === 'generate' ? (
+                      {inputMode === 'transcribe' ? (
+                        <div className="space-y-6">
+                          {/* File Dropzone for Audio (.webm) */}
+                          <div
+                            onDragEnter={(e) => { e.preventDefault(); setAudioDragActive(true); }}
+                            onDragLeave={(e) => { e.preventDefault(); setAudioDragActive(false); }}
+                            onDragOver={(e) => { e.preventDefault(); setAudioDragActive(true); }}
+                            onDrop={async (e) => {
+                              e.preventDefault();
+                              setAudioDragActive(false);
+                              if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                                const file = e.dataTransfer.files[0];
+                                setAudioFile(file);
+                              }
+                            }}
+                            onClick={() => audioFileInputRef.current?.click()}
+                            className={cn(
+                              "border-2 border-dashed rounded-2xl p-8 flex flex-col items-center justify-center gap-4 cursor-pointer transition-all bg-dominus-black/20",
+                              audioDragActive 
+                                ? "border-dominus-green bg-dominus-green/5 shadow-[0_0_20px_rgba(0,210,122,0.1)]" 
+                                : "border-white/10 hover:border-white/20 hover:bg-white/5"
+                            )}
+                          >
+                            <input
+                              ref={audioFileInputRef}
+                              type="file"
+                              accept="audio/*,.webm,.mp3,.wav,.m4a,.ogg"
+                              onChange={(e) => {
+                                if (e.target.files && e.target.files[0]) {
+                                  setAudioFile(e.target.files[0]);
+                                }
+                              }}
+                              className="hidden"
+                            />
+                            
+                            {audioFile ? (
+                              <div className="flex flex-col items-center text-center gap-3">
+                                <div className="w-14 h-14 rounded-2xl bg-dominus-green/10 text-dominus-green flex items-center justify-center border border-dominus-green/20">
+                                  <FileAudio size={28} />
+                                </div>
+                                <div>
+                                  <p className="text-sm font-bold text-white">{audioFile.name}</p>
+                                  <p className="text-xs text-dominus-gray mt-1">
+                                    {(audioFile.size / (1024 * 1024)).toFixed(2)} MB • Clique para alterar o arquivo
+                                  </p>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex flex-col items-center text-center gap-3">
+                                <div className="w-14 h-14 rounded-2xl bg-white/5 flex items-center justify-center text-dominus-green">
+                                  <Mic size={28} />
+                                </div>
+                                <div>
+                                  <p className="text-sm font-semibold text-white">
+                                    Arraste ou clique para carregar o arquivo de áudio (.webm)
+                                  </p>
+                                  <p className="text-xs text-dominus-gray mt-1">
+                                    Aceita .webm, .mp3, .wav, .m4a. Sem limite de tempo de áudio.
+                                  </p>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Webhook Notice */}
+                          <div className="p-4 rounded-xl bg-dominus-black/40 border border-white/5 flex items-start gap-3">
+                            <Volume2 size={18} className="text-dominus-green shrink-0 mt-0.5" />
+                            <div className="text-xs text-dominus-gray leading-relaxed">
+                              <p className="text-white font-semibold mb-1">Webhook de Transcrição Configurado:</p>
+                              <p className="font-mono text-[11px] text-dominus-green/90 break-all">
+                                https://nen.auto-jornada.space/webhook/recebe-audio-arquivowebm
+                              </p>
+                              <p className="mt-1">
+                                O áudio é enviado diretamente ao webhook de transcrição sem limite de tempo e o progresso é exibido até a finalização.
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex justify-end gap-3">
+                            {audioFile && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setAudioFile(null); }}
+                                className="px-6 py-3 rounded-xl border border-white/10 text-xs font-bold text-dominus-gray hover:text-white hover:bg-white/5 transition-all"
+                              >
+                                Limpar Áudio
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handleAudioSend()}
+                              disabled={isLoading || !audioFile}
+                              className="dominus-button px-10 py-4 flex items-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed font-bold"
+                            >
+                              <Mic size={20} />
+                              <span>Enviar e Transcrever Áudio</span>
+                            </button>
+                          </div>
+                        </div>
+                      ) : inputMode === 'generate' ? (
                         <div className="space-y-6">
                           {/* File Dropzone for Transcription */}
                           <div
