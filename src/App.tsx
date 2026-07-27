@@ -636,7 +636,7 @@ type AnalysisResult = {
 type View = 'dashboard' | 'history' | 'settings';
 
 export default function App() {
-  const [view, setView] = useState<View>('dashboard');
+  const [view, setView] = useState<View>('history');
   const [transcription, setTranscription] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1327,16 +1327,16 @@ export default function App() {
         />
         
         <NavButton 
-          active={view === 'dashboard'} 
-          onClick={() => setView('dashboard')} 
-          icon={<LayoutDashboard size={24} />} 
-          label="Dashboard"
-        />
-        <NavButton 
           active={view === 'history'} 
           onClick={() => setView('history')} 
           icon={<HistoryIcon size={24} />} 
           label="Histórico"
+        />
+        <NavButton 
+          active={view === 'dashboard'} 
+          onClick={() => setView('dashboard')} 
+          icon={<LayoutDashboard size={24} />} 
+          label="Gerador / Dashboard"
         />
         <NavButton 
           active={view === 'settings'} 
@@ -1373,11 +1373,11 @@ export default function App() {
           crossOrigin="anonymous"
         />
         <div className="flex gap-4 items-center">
-          <button onClick={() => setView('dashboard')} className={cn("p-2", view === 'dashboard' ? "text-dominus-green" : "text-dominus-gray")}>
-            <LayoutDashboard size={20} />
-          </button>
           <button onClick={() => setView('history')} className={cn("p-2", view === 'history' ? "text-dominus-green" : "text-dominus-gray")}>
             <HistoryIcon size={20} />
+          </button>
+          <button onClick={() => setView('dashboard')} className={cn("p-2", view === 'dashboard' ? "text-dominus-green" : "text-dominus-gray")}>
+            <LayoutDashboard size={20} />
           </button>
           <button onClick={() => setView('settings')} className={cn("p-2", view === 'settings' ? "text-dominus-green" : "text-dominus-gray")}>
             <SettingsIcon size={20} />
