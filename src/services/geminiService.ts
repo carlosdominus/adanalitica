@@ -192,8 +192,6 @@ export async function transcribeAndAnalyzeAudio(file: File) {
   try {
     const formData = new FormData();
     formData.append("file", file, file.name || "audio.webm");
-    formData.append("audio", file, file.name || "audio.webm");
-    formData.append("data", file, file.name || "audio.webm");
 
     const response = await fetch("https://nen.auto-jornada.space/webhook/recebe-audio-arquivowebm", {
       method: "POST",
