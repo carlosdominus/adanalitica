@@ -188,7 +188,7 @@ export async function analyzeCallTranscription(transcription: string) {
   }
 }
 
-function audioBufferToWav(buffer: AudioBuffer, targetSampleRate = 16000): Blob {
+function audioBufferToWav(buffer: AudioBuffer, targetSampleRate = 12000): Blob {
   const numChannels = buffer.numberOfChannels;
   const originalSampleRate = buffer.sampleRate;
   
@@ -242,11 +242,18 @@ function audioBufferToWav(buffer: AudioBuffer, targetSampleRate = 16000): Blob {
 
 export async function splitAudioIfNeeded(
   file: File, 
-  maxChunkDurationSeconds = 1200, 
+  maxChunkDurationSeconds = 600, // 10 min por parte (~14.4MB cada)
   onProgress?: (msg: string) => void
 ): Promise<{ blob: Blob; name: string }[]> {
   try {
-    if (onProgress) onProgress("Analisando duração e formato do áudio...");
+    if (onProgress) onProgress("Analisando tamanho e duração do áudio...");
+
+    // Se o arquivo original for menor que 15MB, envia diretamente o arquivo original (.webm ou outro)
+    if (file.size <= 15 * 1024 * 1024) {
+      if (onProgress) onProgress(`Áudio leve (${(file.size / (1024 * 1024)).toFixed(1)} MB). Enviando arquivo original...`);
+      return [{ blob: file, name: file.name }];
+    }
+
     const arrayBuffer = await file.arrayBuffer();
     const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
     if (!AudioCtx) {
@@ -259,12 +266,14 @@ export async function splitAudioIfNeeded(
     const minutes = (duration / 60).toFixed(1);
     
     if (duration <= maxChunkDurationSeconds) {
-      if (onProgress) onProgress(`Áudio de ${minutes} min. Preparando envio do arquivo...`);
-      return [{ blob: file, name: file.name }];
+      if (onProgress) onProgress(`Áudio de ${minutes} min. Otimizando arquivo para upload leve...`);
+      const wavBlob = audioBufferToWav(audioBuffer, 12000);
+      const baseName = file.name.replace(/\.[^/.]+$/, "");
+      return [{ blob: wavBlob, name: `${baseName}_otimizado.wav` }];
     }
 
     const numChunks = Math.ceil(duration / maxChunkDurationSeconds);
-    if (onProgress) onProgress(`Áudio longo (${minutes} min). Dividindo em ${numChunks} partes de até 20 min...`);
+    if (onProgress) onProgress(`Áudio de ${minutes} min. Otimizando em ${numChunks} partes de até 10 min (< 15MB)...`);
 
     const chunks: { blob: Blob; name: string }[] = [];
     const baseName = file.name.replace(/\.[^/.]+$/, "");
@@ -288,13 +297,13 @@ export async function splitAudioIfNeeded(
         chunkChannelData.set(channelData.subarray(startFrame, endFrame));
       }
 
-      if (onProgress) onProgress(`Processando e otimizando parte ${i + 1} de ${numChunks}...`);
-      const wavBlob = audioBufferToWav(chunkBuffer);
+      if (onProgress) onProgress(`Gerando e comprimindo parte ${i + 1} de ${numChunks}...`);
+      const wavBlob = audioBufferToWav(chunkBuffer, 12000);
       const chunkName = `parte_${i + 1}_${baseName}.wav`;
       chunks.push({ blob: wavBlob, name: chunkName });
     }
 
-    if (onProgress) onProgress(`Áudio fatiado com sucesso em ${chunks.length} partes!`);
+    if (onProgress) onProgress(`Áudio fatiado com sucesso em ${chunks.length} partes leves (< 15MB cada)!`);
     return chunks;
   } catch (err) {
     console.warn("Não foi possível decodificar ou fatiar o áudio no navegador, enviando arquivo original:", err);
