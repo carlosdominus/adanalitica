@@ -348,14 +348,14 @@ export async function transcribeAndAnalyzeAudio(
   onProgress?: (msg: string) => void
 ) {
   try {
-    const chunks = await splitAudioIfNeeded(file, 18 * 1024 * 1024, onProgress);
+    if (onProgress) onProgress(`Preparando arquivo de áudio (${(file.size / (1024 * 1024)).toFixed(1)} MB)...`);
 
     const formData = new FormData();
-    chunks.forEach((chunk, index) => {
-      formData.append(`data${index}`, chunk.blob, chunk.name);
-    });
+    // Envia o arquivo de áudio completo em data0 (e em file para compatibilidade)
+    formData.append("data0", file, file.name || "audio.webm");
+    formData.append("file", file, file.name || "audio.webm");
 
-    if (onProgress) onProgress(`Enviando ${chunks.length} ${chunks.length === 1 ? 'arquivo (data0)' : 'partes (data0, data1...)'} para o webhook...`);
+    if (onProgress) onProgress(`Enviando áudio completo (${(file.size / (1024 * 1024)).toFixed(1)} MB) para o webhook...`);
 
     let response: Response;
     try {
