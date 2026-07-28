@@ -348,7 +348,7 @@ export async function transcribeAndAnalyzeAudio(
   onProgress?: (msg: string) => void
 ) {
   try {
-    const chunks = await splitAudioIfNeeded(file, 1200, onProgress);
+    const chunks = await splitAudioIfNeeded(file, 18 * 1024 * 1024, onProgress);
 
     const formData = new FormData();
     chunks.forEach((chunk, index) => {
@@ -357,13 +357,19 @@ export async function transcribeAndAnalyzeAudio(
 
     if (onProgress) onProgress(`Enviando ${chunks.length} ${chunks.length === 1 ? 'arquivo (data0)' : 'partes (data0, data1...)'} para o webhook...`);
 
-    const response = await fetch("https://nen.auto-jornada.space/webhook/recebe-audio-arquivowebm", {
-      method: "POST",
-      headers: {
-        "Accept": "application/json, text/plain, */*",
-      },
-      body: formData,
-    });
+    let response: Response;
+    try {
+      response = await fetch("https://nen.auto-jornada.space/webhook/recebe-audio-arquivowebm", {
+        method: "POST",
+        headers: {
+          "Accept": "application/json, text/plain, */*",
+        },
+        body: formData,
+      });
+    } catch (netErr: any) {
+      console.error("Fetch network error:", netErr);
+      throw new Error(`Falha na conexão com o webhook do n8n (${netErr?.message || 'Failed to fetch'}). Verifique se a URL do webhook está ativa e acessível.`);
+    }
 
     const responseText = await response.text();
 
