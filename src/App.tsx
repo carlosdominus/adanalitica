@@ -654,6 +654,7 @@ export default function App() {
   const [inputMode, setInputMode] = useState<'transcribe' | 'generate' | 'import'>('transcribe');
   const [importText, setImportText] = useState('');
   const [audioFile, setAudioFile] = useState<File | null>(null);
+  const [audioStatusMsg, setAudioStatusMsg] = useState<string>('');
   
   const dashboardRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -935,8 +936,11 @@ export default function App() {
 
     setIsLoading(true);
     setError(null);
+    setAudioStatusMsg('Iniciando processamento do áudio...');
     try {
-      const result = await transcribeAndAnalyzeAudio(fileToSend);
+      const result = await transcribeAndAnalyzeAudio(fileToSend, (msg) => {
+        setAudioStatusMsg(msg);
+      });
       const sanitizedMarkdown = sanitizeMarkdown(result.markdown);
       const newAnalysis: AnalysisResult = {
         ...result,
@@ -956,6 +960,7 @@ export default function App() {
       setTimeout(() => {
         setCurrentAnalysis(newAnalysis);
         setAudioFile(null);
+        setAudioStatusMsg('');
         setIsLoading(false);
       }, 500);
     } catch (err) {
@@ -1550,10 +1555,12 @@ export default function App() {
                           transition={{ duration: 2, repeat: Infinity }}
                         >
                           {inputMode === 'transcribe' ? (
-                            progress < 30 ? "Enviando áudio (.webm) ao webhook..." : 
-                            progress < 60 ? "Transcrevendo áudio com Inteligência..." : 
-                            progress < 85 ? "Mapeando métricas, participantes e falas..." : 
-                            "Finalizando e salvando no histórico..."
+                            audioStatusMsg || (
+                              progress < 30 ? "Enviando áudio ao webhook..." : 
+                              progress < 60 ? "Transcrevendo áudio..." : 
+                              progress < 85 ? "Mapeando métricas e falas..." : 
+                              "Finalizando e salvando no histórico..."
+                            )
                           ) : (
                             progress < 30 ? "Lendo transcrição..." : 
                             progress < 60 ? "Extraindo métricas de ads..." : 

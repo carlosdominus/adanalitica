@@ -188,10 +188,133 @@ export async function analyzeCallTranscription(transcription: string) {
   }
 }
 
-export async function transcribeAndAnalyzeAudio(file: File) {
+function audioBufferToWav(buffer: AudioBuffer, targetSampleRate = 16000): Blob {
+  const numChannels = buffer.numberOfChannels;
+  const originalSampleRate = buffer.sampleRate;
+  
+  const length = Math.floor(buffer.duration * targetSampleRate);
+  const monoData = new Float32Array(length);
+  
+  const ratio = originalSampleRate / targetSampleRate;
+  for (let i = 0; i < length; i++) {
+    const origIndex = Math.floor(i * ratio);
+    let sum = 0;
+    for (let c = 0; c < numChannels; c++) {
+      const channelData = buffer.getChannelData(c);
+      sum += channelData[origIndex] || 0;
+    }
+    monoData[i] = sum / numChannels;
+  }
+
+  const arrayBuffer = new ArrayBuffer(44 + monoData.length * 2);
+  const view = new DataView(arrayBuffer);
+
+  const writeString = (offset: number, str: string) => {
+    for (let i = 0; i < str.length; i++) {
+      view.setUint8(offset + i, str.charCodeAt(i));
+    }
+  };
+
+  writeString(0, 'RIFF');
+  view.setUint32(4, 36 + monoData.length * 2, true);
+  writeString(8, 'WAVE');
+  writeString(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, targetSampleRate, true);
+  view.setUint32(28, targetSampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+
+  writeString(36, 'data');
+  view.setUint32(40, monoData.length * 2, true);
+
+  let offset = 44;
+  for (let i = 0; i < monoData.length; i++) {
+    const s = Math.max(-1, Math.min(1, monoData[i]));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+    offset += 2;
+  }
+
+  return new Blob([arrayBuffer], { type: 'audio/wav' });
+}
+
+export async function splitAudioIfNeeded(
+  file: File, 
+  maxChunkDurationSeconds = 1200, 
+  onProgress?: (msg: string) => void
+): Promise<{ blob: Blob; name: string }[]> {
   try {
+    if (onProgress) onProgress("Analisando duração e formato do áudio...");
+    const arrayBuffer = await file.arrayBuffer();
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) {
+      return [{ blob: file, name: file.name }];
+    }
+    const audioContext = new AudioCtx();
+    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+    
+    const duration = audioBuffer.duration;
+    const minutes = (duration / 60).toFixed(1);
+    
+    if (duration <= maxChunkDurationSeconds) {
+      if (onProgress) onProgress(`Áudio de ${minutes} min. Preparando envio do arquivo...`);
+      return [{ blob: file, name: file.name }];
+    }
+
+    const numChunks = Math.ceil(duration / maxChunkDurationSeconds);
+    if (onProgress) onProgress(`Áudio longo (${minutes} min). Dividindo em ${numChunks} partes de até 20 min...`);
+
+    const chunks: { blob: Blob; name: string }[] = [];
+    const baseName = file.name.replace(/\.[^/.]+$/, "");
+
+    for (let i = 0; i < numChunks; i++) {
+      const startTime = i * maxChunkDurationSeconds;
+      const endTime = Math.min((i + 1) * maxChunkDurationSeconds, duration);
+      const startFrame = Math.floor(startTime * audioBuffer.sampleRate);
+      const endFrame = Math.floor(endTime * audioBuffer.sampleRate);
+      const frameCount = endFrame - startFrame;
+
+      const chunkBuffer = audioContext.createBuffer(
+        audioBuffer.numberOfChannels,
+        frameCount,
+        audioBuffer.sampleRate
+      );
+
+      for (let c = 0; c < audioBuffer.numberOfChannels; c++) {
+        const channelData = audioBuffer.getChannelData(c);
+        const chunkChannelData = chunkBuffer.getChannelData(c);
+        chunkChannelData.set(channelData.subarray(startFrame, endFrame));
+      }
+
+      if (onProgress) onProgress(`Processando e otimizando parte ${i + 1} de ${numChunks}...`);
+      const wavBlob = audioBufferToWav(chunkBuffer);
+      const chunkName = `parte_${i + 1}_${baseName}.wav`;
+      chunks.push({ blob: wavBlob, name: chunkName });
+    }
+
+    if (onProgress) onProgress(`Áudio fatiado com sucesso em ${chunks.length} partes!`);
+    return chunks;
+  } catch (err) {
+    console.warn("Não foi possível decodificar ou fatiar o áudio no navegador, enviando arquivo original:", err);
+    return [{ blob: file, name: file.name }];
+  }
+}
+
+export async function transcribeAndAnalyzeAudio(
+  file: File,
+  onProgress?: (msg: string) => void
+) {
+  try {
+    const chunks = await splitAudioIfNeeded(file, 1200, onProgress);
+
     const formData = new FormData();
-    formData.append("file", file, file.name || "audio.webm");
+    chunks.forEach((chunk, index) => {
+      formData.append(`data${index}`, chunk.blob, chunk.name);
+    });
+
+    if (onProgress) onProgress(`Enviando ${chunks.length} ${chunks.length === 1 ? 'arquivo (data0)' : 'partes (data0, data1...)'} para o webhook...`);
 
     const response = await fetch("https://nen.auto-jornada.space/webhook/recebe-audio-arquivowebm", {
       method: "POST",
