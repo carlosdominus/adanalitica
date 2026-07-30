@@ -158,6 +158,17 @@ body {
   color: #D32F2F !important;
 }
 
+/* Consensus and Hypothesis styling rules */
+.markdown-body .bg-\[\#004D2E\],
+.markdown-body .bg-\[\#004D2E\] * {
+  color: #FFFFFF !important;
+}
+
+.markdown-body .bg-dominus-green,
+.markdown-body .bg-dominus-green * {
+  color: #0A0A0A !important;
+}
+
 .markdown-body pre, .markdown-body code {
   white-space: pre-wrap !important;
   word-break: break-word !important;

@@ -88,11 +88,15 @@ export async function analyzeCallTranscription(transcription: string) {
         // Not JSON
       }
 
-      // Unescape literal \n strings into actual newlines
+      // Unescape literal \n strings into actual newlines and remove escaped syntax
       rawMarkdown = rawMarkdown
         .replace(/\\n/g, '\n')
         .replace(/\\r/g, '')
-        .replace(/\\"/g, '"');
+        .replace(/\\"/g, '"')
+        .replace(/\\'/g, "'")
+        .replace(/\\\*/g, '*')
+        .replace(/\\_/g, '_')
+        .replace(/\\#/g, '#');
     }
 
     // Fallback: If no ads were provided by webhook but we have markdown text, extract specific ad numbers and expand variations
@@ -351,9 +355,8 @@ export async function transcribeAndAnalyzeAudio(
     if (onProgress) onProgress(`Preparando arquivo de áudio (${(file.size / (1024 * 1024)).toFixed(1)} MB)...`);
 
     const formData = new FormData();
-    // Envia o arquivo de áudio completo em data0 (e em file para compatibilidade)
+    // Envia o arquivo de áudio único em data0
     formData.append("data0", file, file.name || "audio.webm");
-    formData.append("file", file, file.name || "audio.webm");
 
     if (onProgress) onProgress(`Enviando áudio completo (${(file.size / (1024 * 1024)).toFixed(1)} MB) para o webhook...`);
 
@@ -402,10 +405,20 @@ export async function transcribeAndAnalyzeAudio(
       if (typeof obj === 'object') {
         if (obj.markdown) return extractText(obj.markdown);
         if (obj.output) return extractText(obj.output);
+        if (obj.transcricao_final) return extractText(obj.transcricao_final);
+        if (obj.transcricao) return extractText(obj.transcricao);
         if (obj.content) return extractText(obj.content);
         if (obj.text) return extractText(obj.text);
         if (obj.transcription) return extractText(obj.transcription);
+        if (obj.ata) return extractText(obj.ata);
+        if (obj.resumo) return extractText(obj.resumo);
+        if (obj.resultado) return extractText(obj.resultado);
         if (obj.ata_download && obj.ata_download.content) return extractText(obj.ata_download.content);
+        // If single key object
+        const keys = Object.keys(obj);
+        if (keys.length === 1 && typeof obj[keys[0]] === 'string') {
+          return extractText(obj[keys[0]]);
+        }
         return JSON.stringify(obj, null, 2);
       }
       return String(obj);
@@ -434,7 +447,11 @@ export async function transcribeAndAnalyzeAudio(
       rawMarkdown = rawMarkdown
         .replace(/\\n/g, '\n')
         .replace(/\\r/g, '')
-        .replace(/\\"/g, '"');
+        .replace(/\\"/g, '"')
+        .replace(/\\'/g, "'")
+        .replace(/\\\*/g, '*')
+        .replace(/\\_/g, '_')
+        .replace(/\\#/g, '#');
     }
 
     return {

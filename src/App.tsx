@@ -87,28 +87,10 @@ function getTextFromChildren(children: any): string {
 
 function getSentimentColorClass(text: string): string {
   if (!text) return "";
-  const lower = text.toLowerCase();
+  const lower = text.toLowerCase().trim();
 
-  // Disable sentiment coloring for participant names and their specific text-based feedback/analyses
-  // Also disable for consensus ("concenso") and hypotheses as they have special marker highlights
+  // Disable sentiment coloring for consensus and hypotheses as they have special box highlights
   if (
-    lower.includes("participante") ||
-    lower.includes("gestor") ||
-    lower.includes("editor") ||
-    lower.includes("copy") ||
-    lower.includes("designer") ||
-    lower.includes("tráfego") ||
-    lower.includes("trafego") ||
-    lower.includes("análise do") ||
-    lower.includes("analise do") ||
-    lower.includes("análise de") ||
-    lower.includes("analise de") ||
-    lower.includes("análise da") ||
-    lower.includes("analise da") ||
-    lower.includes("análise dos") ||
-    lower.includes("analise dos") ||
-    lower.includes("análise das") ||
-    lower.includes("analise das") ||
     lower.includes("consenso") ||
     lower.includes("concenso") ||
     lower.includes("hipotese") ||
@@ -116,8 +98,18 @@ function getSentimentColorClass(text: string): string {
   ) {
     return "";
   }
-  
-  // 1. If it doesn't have data, it must be white (return empty)
+
+  // Only disable sentiment coloring for lines that are strictly participant list headers/declarations
+  if (
+    lower.startsWith("participantes:") ||
+    lower.startsWith("participante:") ||
+    lower.startsWith("presentes:") ||
+    lower.startsWith("integrantes:")
+  ) {
+    return "";
+  }
+
+  // If line indicates no data / placeholder
   if (
     text.includes("—") || 
     text.includes("---") ||
@@ -129,7 +121,7 @@ function getSentimentColorClass(text: string): string {
     return "";
   }
 
-  // Helper to extract the first number (handles comma decimals, e.g., 4,71 -> 4.71)
+  // Helper to extract numeric value
   const extractNumericValue = (str: string): number | null => {
     const match = str.match(/([0-9]+(?:[.,][0-9]+)?)/);
     if (!match) return null;
@@ -138,99 +130,109 @@ function getSentimentColorClass(text: string): string {
     return isNaN(val) ? null : val;
   };
 
-  // High-priority phrases for negative context (e.g., "não vendeu bem")
+  // High-priority negative indicators
   const hasNegativePhrases = 
     lower.includes("não vendeu") || 
     lower.includes("não performou") ||
     lower.includes("não entregou") ||
-    lower.includes("baixo") || 
-    lower.includes("insuficiente") || 
+    lower.includes("não aprovou") ||
+    lower.includes("baixa conversão") ||
+    lower.includes("conversão baixa") ||
     lower.includes("prejuízo") || 
+    lower.includes("prejuizo") ||
     lower.includes("ruim") ||
+    lower.includes("ruins") ||
     lower.includes("queda") ||
     lower.includes("piorou") ||
     lower.includes("parar") ||
     lower.includes("pausar") ||
-    lower.includes("morreu");
+    lower.includes("pausado") ||
+    lower.includes("pausadas") ||
+    lower.includes("descartar") ||
+    lower.includes("descartado") ||
+    lower.includes("reprovado") ||
+    lower.includes("reprovados") ||
+    lower.includes("reprovada") ||
+    lower.includes("morreu") ||
+    lower.includes("alerta") ||
+    lower.includes("insuficiente");
 
-  // 2. Metric-specific evaluation
-  
-  // ROAS or ROI
+  // High-priority positive indicators
+  const hasPositivePhrases =
+    lower.includes("validou") ||
+    lower.includes("validado") ||
+    lower.includes("validados") ||
+    lower.includes("validada") ||
+    lower.includes("escalar") ||
+    lower.includes("escala") ||
+    lower.includes("escalou") ||
+    lower.includes("escalonou") ||
+    lower.includes("lucro") ||
+    lower.includes("lucros") ||
+    lower.includes("lucrativo") ||
+    lower.includes("vendeu bem") ||
+    lower.includes("performou bem") ||
+    lower.includes("ótimo") ||
+    lower.includes("otimo") ||
+    lower.includes("excelente") ||
+    lower.includes("excelentes") ||
+    lower.includes("aprovado") ||
+    lower.includes("aprovados") ||
+    lower.includes("aprovada") ||
+    lower.includes("vencedor") ||
+    lower.includes("vencedores");
+
+  // Emojis check
+  if (text.includes("💀") || text.includes("🚨") || text.includes("❌") || text.includes("🔴")) {
+    return "sentiment-negative";
+  }
+  if (text.includes("🔥") || text.includes("🚀") || text.includes("✅") || text.includes("🟢") || text.includes("💰")) {
+    return "sentiment-positive";
+  }
+
+  // Metric evaluations
   if (lower.includes("roas") || lower.includes("roi")) {
     if (hasNegativePhrases) return "sentiment-negative";
-    const val = extractNumericValue(text);
-    if (val !== null) {
-      return val >= 1.8 ? "sentiment-positive" : "sentiment-negative";
-    }
-  }
-
-  // Vendas (Sales)
-  if (lower.includes("vendas") || lower.includes("venda")) {
-    if (hasNegativePhrases) return "sentiment-negative";
-    const val = extractNumericValue(text);
-    if (val !== null) {
-      return val >= 3 ? "sentiment-positive" : "sentiment-negative";
-    }
-  }
-
-  // CTR
-  if (lower.includes("ctr")) {
+    if (hasPositivePhrases) return "sentiment-positive";
     const val = extractNumericValue(text);
     if (val !== null) {
       return val >= 1.5 ? "sentiment-positive" : "sentiment-negative";
     }
   }
 
-  // CPC (lower is better, e.g. <= 1.50 is good, >= 2.50 is bad)
+  if (lower.includes("vendas") || lower.includes("venda")) {
+    if (hasNegativePhrases) return "sentiment-negative";
+    if (hasPositivePhrases) return "sentiment-positive";
+    const val = extractNumericValue(text);
+    if (val !== null) {
+      return val >= 2 ? "sentiment-positive" : "sentiment-negative";
+    }
+  }
+
+  if (lower.includes("ctr")) {
+    const val = extractNumericValue(text);
+    if (val !== null) {
+      return val >= 1.2 ? "sentiment-positive" : "sentiment-negative";
+    }
+  }
+
   if (lower.includes("cpc")) {
     const val = extractNumericValue(text);
     if (val !== null) {
-      return val <= 1.5 ? "sentiment-positive" : val >= 2.5 ? "sentiment-negative" : "";
+      return val <= 1.3 ? "sentiment-positive" : val >= 2.0 ? "sentiment-negative" : "";
     }
   }
 
-  // CPI, CPA, Custo por IC, Custo por Cadastro
-  if (
-    lower.includes("cpi") || 
-    lower.includes("cpa") || 
-    lower.includes("custo por ic") || 
-    lower.includes("custo por cadastro")
-  ) {
+  if (lower.includes("hook rate") || lower.includes("hookrate")) {
     const val = extractNumericValue(text);
     if (val !== null) {
-      return val <= 8.0 ? "sentiment-positive" : val >= 18.0 ? "sentiment-negative" : "";
+      return val >= 40 ? "sentiment-positive" : "sentiment-negative";
     }
   }
 
-  // Conversão (Conversion Rate)
-  if (lower.includes("conversão") || lower.includes("conversao")) {
-    const val = extractNumericValue(text);
-    if (val !== null) {
-      return val >= 2.0 ? "sentiment-positive" : "sentiment-negative";
-    }
-  }
-
-  // 3. Fallback for non-metric lines using STRICT word boundaries (to avoid matching "criativo" for "ativo")
-  if (
-    /\b(pausado|pausada|pausar|pausados|pausadas|reprovado|reprovados|reprovada|ruim|ruins|morreu|prejuízo|alerta|parar)\b/i.test(text) ||
-    lower.includes("não vendeu") ||
-    lower.includes("não performou") ||
-    lower.includes("não entregou") ||
-    text.includes("💀") || 
-    text.includes("🚨") || 
-    text.includes("❌")
-  ) {
-    return "sentiment-negative";
-  }
-
-  if (
-    /\b(ativo|ativa|ativos|ativas|escalonou|escalar|escala|escalou|bom|boa|bons|boas|excelente|excelentes|aprovado|aprovados|aprovada|lucro|lucros)\b/i.test(text) ||
-    text.includes("🔥") || 
-    text.includes("🚀") || 
-    text.includes("✅")
-  ) {
-    return "sentiment-positive";
-  }
+  // Fallbacks
+  if (hasNegativePhrases) return "sentiment-negative";
+  if (hasPositivePhrases) return "sentiment-positive";
 
   return "";
 }
@@ -267,43 +269,80 @@ function sanitizeMarkdown(md: string): string {
   if (!md) return "";
   let cleaned = md.trim();
   
-  // Extract markdown from code blocks if they are present anywhere (e.g., inside conversational output)
+  // Extract from JSON stringified objects if wrapped e.g. '{"output": "..."}' or '{"transcricao_final": "..."}'
+  if ((cleaned.startsWith('{') && cleaned.endsWith('}')) || (cleaned.startsWith('[') && cleaned.endsWith(']'))) {
+    try {
+      const parsed = JSON.parse(cleaned);
+      if (typeof parsed === 'string') {
+        cleaned = parsed.trim();
+      } else if (parsed && typeof parsed === 'object') {
+        const extracted = 
+          parsed.markdown || 
+          parsed.output || 
+          parsed.content || 
+          parsed.text || 
+          parsed.transcricao_final || 
+          parsed.transcricao || 
+          parsed.transcription || 
+          parsed.ata || 
+          parsed.resumo;
+        if (extracted && typeof extracted === 'string') {
+          cleaned = extracted.trim();
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  // Extract markdown from code blocks if present
   const codeBlockRegex = /```(?:markdown|md)?\s*\n([\s\S]*?)\n\s*```/gi;
   const match = codeBlockRegex.exec(cleaned);
   if (match && match[1]) {
     cleaned = match[1].trim();
-  } else {
-    // Fallback simple trim of starting backticks
-    if (cleaned.startsWith('```')) {
-      cleaned = cleaned.replace(/^```[a-zA-Z0-9_-]*\n?/i, '');
-      cleaned = cleaned.replace(/\n?```$/, '');
-    }
+  } else if (cleaned.startsWith('```')) {
+    cleaned = cleaned.replace(/^```[a-zA-Z0-9_-]*\n?/i, '');
+    cleaned = cleaned.replace(/\n?```$/, '');
   }
   
-  // Split into lines to remove any uniform leading indentation that would trigger raw preformatted text parsing
+  // Unescape backslash escapes
+  cleaned = cleaned
+    .replace(/\\n/g, '\n')
+    .replace(/\\r/g, '')
+    .replace(/\\"/g, '"')
+    .replace(/\\'/g, "'")
+    .replace(/\\\*/g, '*')
+    .replace(/\\_/g, '_')
+    .replace(/\\#/g, '#');
+
+  // Handle double backslashes if any remain
+  cleaned = cleaned
+    .replace(/\\\*/g, '*')
+    .replace(/\\_/g, '_');
+
+  // Process line by line to fix 4+ space indentations that trigger markdown pre/code blocks
   const lines = cleaned.split('\n');
-  let minIndent = Infinity;
-  for (const line of lines) {
-    if (line.trim().length === 0) continue;
-    const match = line.match(/^(\s*)/);
-    if (match) {
-      const indentLength = match[1].length;
-      if (indentLength < minIndent) {
-        minIndent = indentLength;
+  let inCodeBlock = false;
+  
+  const processedLines = lines.map(line => {
+    if (line.trim().startsWith('```')) {
+      inCodeBlock = !inCodeBlock;
+      return line;
+    }
+    if (inCodeBlock) return line;
+
+    // Fix 4+ leading spaces
+    if (/^\s{4,}/.test(line)) {
+      if (/^\s{4,}(?:[-*+]\s|\d+\.\s)/.test(line)) {
+        return line.replace(/^\s{4,}/, '  '); // 2 spaces for nested lists
+      } else {
+        return line.replace(/^\s{4,}/, ''); // 0 spaces for normal lines
       }
     }
-  }
-  
-  if (minIndent > 0 && minIndent !== Infinity) {
-    cleaned = lines.map(line => {
-      if (line.trim().length === 0) return '';
-      return line.slice(minIndent);
-    }).join('\n');
-  } else {
-    cleaned = lines.join('\n');
-  }
-  
-  return cleaned.trim();
+    return line;
+  });
+
+  return processedLines.join('\n').trim();
 }
 
 function markdownToHtml(markdown: string): string {
@@ -1917,6 +1956,13 @@ export default function App() {
                           <div className="markdown-body prose prose-invert max-w-none text-base leading-relaxed">
                             <Markdown
                               components={{
+                                pre: ({ children }) => <>{children}</>,
+                                code: ({ node, inline, className, children, ...props }: any) => {
+                                  if (inline) {
+                                    return <code className="bg-white/10 px-1.5 py-0.5 rounded text-dominus-green font-mono text-xs" {...props}>{children}</code>;
+                                  }
+                                  return <div className="my-2 font-sans text-base leading-relaxed text-white whitespace-pre-wrap">{children}</div>;
+                                },
                                 li: ({ node, children, ...props }) => {
                                   const textContent = getTextFromChildren(children);
                                   const lower = textContent.toLowerCase();
@@ -1989,7 +2035,7 @@ export default function App() {
                                 }
                               }}
                             >
-                              {currentAnalysis.markdown}
+                              {sanitizeMarkdown(currentAnalysis.markdown)}
                             </Markdown>
                           </div>
                         </div>
