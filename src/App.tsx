@@ -712,6 +712,12 @@ export default function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
+  // Delete Password Modal states
+  const [itemToDelete, setItemToDelete] = useState<string | null>(null);
+  const [deletePasswordInput, setDeletePasswordInput] = useState('');
+  const [deletePasswordError, setDeletePasswordError] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
   // Monitor Auth state
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -1274,28 +1280,29 @@ export default function App() {
     URL.revokeObjectURL(url);
   };
 
-  const deleteHistoryItem = async (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleDeleteSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (deletePasswordInput.trim() !== "Excluir1213!") {
+      setDeletePasswordError("Senha incorreta! Permissão de exclusão negada.");
+      return;
+    }
+    if (!itemToDelete) return;
+
+    setIsDeleting(true);
     try {
-      await deleteDoc(doc(db, "analyses", id));
-      setHistory(prev => prev.filter(item => item.id !== id));
-      if (currentAnalysis?.id === id) {
+      await deleteDoc(doc(db, "analyses", itemToDelete));
+      setHistory(prev => prev.filter(item => item.id !== itemToDelete));
+      if (currentAnalysis?.id === itemToDelete) {
         setCurrentAnalysis(null);
       }
+      setItemToDelete(null);
+      setDeletePasswordInput('');
+      setDeletePasswordError(null);
     } catch (err) {
       console.error("Erro ao excluir do Firestore:", err);
-      setError("Não foi possível excluir o item do histórico.");
-    }
-  };
-
-  const clearAllHistory = async () => {
-    try {
-      await Promise.all(history.map(item => deleteDoc(doc(db, "analyses", item.id))));
-      setHistory([]);
-      setCurrentAnalysis(null);
-    } catch (err) {
-      console.error("Erro ao limpar histórico:", err);
-      setError("Não foi possível limpar o histórico.");
+      setDeletePasswordError("Não foi possível excluir o item do histórico.");
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -2228,15 +2235,6 @@ export default function App() {
                   <h2 className="text-4xl font-display font-bold tracking-tight">
                     Histórico de <span className="text-dominus-green">Análises</span>
                   </h2>
-                  {history.length > 0 && (
-                    <button
-                      onClick={clearAllHistory}
-                      className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 text-xs font-bold transition-all w-fit"
-                    >
-                      <Trash2 size={15} />
-                      Limpar Todo o Histórico
-                    </button>
-                  )}
                 </div>
 
                 {history.length === 0 ? (
@@ -2268,8 +2266,14 @@ export default function App() {
                             </span>
                           </div>
                           <button 
-                            onClick={(e) => deleteHistoryItem(item.id, e)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setItemToDelete(item.id);
+                              setDeletePasswordInput('');
+                              setDeletePasswordError(null);
+                            }}
                             className="p-2 text-dominus-gray hover:text-red-500 transition-colors"
+                            title="Excluir item do histórico"
                           >
                             <Trash2 size={16} />
                           </button>
@@ -2407,6 +2411,84 @@ export default function App() {
           </button>
         </div>
       )}
+
+      {/* Modal de confirmação com senha para exclusão do histórico */}
+      <AnimatePresence>
+        {itemToDelete && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-[#111517] border border-[#1E272B] rounded-2xl p-6 sm:p-8 max-w-md w-full shadow-2xl relative"
+            >
+              <div className="flex items-center gap-3 text-red-500 mb-4">
+                <div className="p-3 bg-red-500/10 rounded-xl">
+                  <Trash2 size={24} />
+                </div>
+                <div>
+                  <h3 className="font-display font-bold text-lg text-white">Confirmar Exclusão</h3>
+                  <p className="text-xs text-dominus-gray">Ação restrita de exclusão</p>
+                </div>
+              </div>
+
+              <p className="text-sm text-dominus-gray mb-6 leading-relaxed">
+                Para excluir esta análise do histórico, insira a senha autorizada:
+              </p>
+
+              <form onSubmit={handleDeleteSubmit} className="space-y-4">
+                <div>
+                  <input 
+                    type="password"
+                    autoFocus
+                    value={deletePasswordInput}
+                    onChange={(e) => {
+                      setDeletePasswordInput(e.target.value);
+                      setDeletePasswordError(null);
+                    }}
+                    placeholder="Digite a senha de exclusão"
+                    className="w-full bg-[#0B0F10] border border-[#1E272B] rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-red-500/50 transition-colors placeholder:text-dominus-gray/50"
+                  />
+                  {deletePasswordError && (
+                    <p className="text-xs text-red-500 mt-2 flex items-center gap-1 font-semibold">
+                      <AlertCircle size={14} />
+                      {deletePasswordError}
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-end gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setItemToDelete(null);
+                      setDeletePasswordInput('');
+                      setDeletePasswordError(null);
+                    }}
+                    className="px-5 py-2.5 rounded-full text-xs font-semibold text-dominus-gray hover:text-white hover:bg-white/5 transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isDeleting}
+                    className="px-6 py-2.5 rounded-full text-xs font-bold bg-red-500 hover:bg-red-600 text-white transition-all shadow-lg shadow-red-500/20 flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                  >
+                    {isDeleting ? (
+                      <>
+                        <Loader2 size={14} className="animate-spin" />
+                        <span>Excluindo...</span>
+                      </>
+                    ) : (
+                      <span>Confirmar Exclusão</span>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
