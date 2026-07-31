@@ -239,16 +239,72 @@ function getSentimentColorClass(text: string): string {
 
 function extractParticipants(markdown: string): string[] {
   if (!markdown) return [];
-  // Look for "Participantes: Gilberto Ortiz (Gestor), ..."
-  const regex = /(?:participantes|participantes\s*da\s*reunião|reunião\s*com)\s*:\s*([^\n]+)/i;
-  const match = markdown.match(regex);
-  if (match) {
-    return match[1]
-      .split(/[,;]+/)
-      .map(p => p.replace(/[#*_-]/g, '').trim())
-      .filter(p => p.length > 0);
+
+  // 1. Look for explicit "Participantes:" or "Presentes:" section block
+  const sectionMatch = markdown.match(/(?:participantes|presentes|integrantes)(?:\s*da\s*reunião|\s*da\s*call)?\s*:\s*([\s\S]*?)(?=\n\s*(?:#{1,6}\s|---|___|\*\*|[A-ZÀ-Ú][a-zà-ú\w\s]*:)|$)/i);
+
+  if (sectionMatch && sectionMatch[1]) {
+    const rawContent = sectionMatch[1].trim();
+    const lines = rawContent.split('\n');
+    const participants: string[] = [];
+
+    for (let rawLine of lines) {
+      let line = rawLine.replace(/^[#*_\-\s]+|[#*_\-\s]+$/g, '').trim();
+      line = line.replace(/^[\d+.]\s*/, '').trim();
+
+      const lower = line.toLowerCase();
+      // Stop if we hit a new major section header
+      if (
+        lower.startsWith('resumo') || 
+        lower.startsWith('análise') || 
+        lower.startsWith('analise') || 
+        lower.startsWith('pendências') || 
+        lower.startsWith('pendencias') || 
+        lower.startsWith('decisões') || 
+        lower.startsWith('decisoes') ||
+        lower.startsWith('pauta') ||
+        lower.startsWith('ata')
+      ) {
+        break;
+      }
+
+      if (
+        line.length > 1 &&
+        !lower.includes('ausente') &&
+        !lower.includes('não participou') &&
+        !lower.includes('nao participou') &&
+        !lower.includes('mencionado')
+      ) {
+        participants.push(line);
+      }
+    }
+
+    if (participants.length > 0) {
+      return participants;
+    }
   }
-  return [];
+
+  // 2. Fallback ONLY if no explicit "Participantes:" section was found at all
+  const participantsSet = new Set<string>();
+  const roleRegex = /(?:\*\*|-|\*|\s)*([A-ZÀ-Ú][a-zá-ú\w\s]+(?:\s+[A-ZÀ-Ú][a-zá-ú\w\s]+)?\s*\((?:Gestor|Editor|Copy|Designer|Tráfego|Trafego|Estrategista|Dono|Host|Sócio|Socio|Analista)[^)]*\))/gi;
+  let match;
+  while ((match = roleRegex.exec(markdown)) !== null) {
+    if (match[1]) {
+      const cleanName = match[1].replace(/[*_#]/g, '').trim();
+      const lower = cleanName.toLowerCase();
+      if (
+        cleanName.length > 1 &&
+        !lower.includes('ausente') &&
+        !lower.includes('não participou') &&
+        !lower.includes('nao participou') &&
+        !lower.includes('mencionado')
+      ) {
+        participantsSet.add(cleanName);
+      }
+    }
+  }
+
+  return Array.from(participantsSet);
 }
 
 function extractMeetingTitle(markdown: string): string {
@@ -786,14 +842,45 @@ export default function App() {
     return () => unsubscribe();
   }, [currentUser]);
 
-  // Load theme from local storage
+  // URL hash and browser back/forward navigation sync
   useEffect(() => {
-    const savedTheme = localStorage.getItem('ad_analytica_theme') as 'dark' | 'light';
-    if (savedTheme) {
-      setTheme(savedTheme);
-      document.documentElement.classList.toggle('light', savedTheme === 'light');
-    }
+    const handleHashChange = () => {
+      const hash = window.location.hash.toLowerCase().replace('#', '');
+      if (hash === 'historico' || hash === 'historico') {
+        setView('history');
+      } else if (hash === 'gerarresumo' || hash === 'dashboard' || hash === 'gerar-resumo') {
+        setView('dashboard');
+      } else if (hash === 'ajustes' || hash === 'settings') {
+        setView('settings');
+      } else if (!hash) {
+        // Default hash if empty
+        window.history.replaceState(null, '', '#historico');
+        setView('history');
+      }
+    };
+
+    // Initialize on mount
+    handleHashChange();
+
+    window.addEventListener('popstate', handleHashChange);
+    window.addEventListener('hashchange', handleHashChange);
+    return () => {
+      window.removeEventListener('popstate', handleHashChange);
+      window.removeEventListener('hashchange', handleHashChange);
+    };
   }, []);
+
+  // Update URL hash when view changes programmatically
+  const navigateToView = (newView: View) => {
+    setView(newView);
+    let targetHash = '#historico';
+    if (newView === 'dashboard') targetHash = '#gerarresumo';
+    if (newView === 'settings') targetHash = '#ajustes';
+
+    if (window.location.hash !== targetHash) {
+      window.history.pushState(null, '', targetHash);
+    }
+  };
 
   // Save theme to local storage
   useEffect(() => {
@@ -1422,19 +1509,19 @@ export default function App() {
         
         <NavButton 
           active={view === 'history'} 
-          onClick={() => setView('history')} 
+          onClick={() => navigateToView('history')} 
           icon={<HistoryIcon size={24} />} 
           label="Histórico"
         />
         <NavButton 
           active={view === 'dashboard'} 
-          onClick={() => setView('dashboard')} 
+          onClick={() => navigateToView('dashboard')} 
           icon={<LayoutDashboard size={24} />} 
           label="Gerador / Dashboard"
         />
         <NavButton 
           active={view === 'settings'} 
-          onClick={() => setView('settings')} 
+          onClick={() => navigateToView('settings')} 
           icon={<SettingsIcon size={24} />} 
           label="Ajustes"
         />
@@ -1467,13 +1554,13 @@ export default function App() {
           crossOrigin="anonymous"
         />
         <div className="flex gap-4 items-center">
-          <button onClick={() => setView('history')} className={cn("p-2", view === 'history' ? "text-dominus-green" : "text-dominus-gray")}>
+          <button onClick={() => navigateToView('history')} className={cn("p-2", view === 'history' ? "text-dominus-green" : "text-dominus-gray")}>
             <HistoryIcon size={20} />
           </button>
-          <button onClick={() => setView('dashboard')} className={cn("p-2", view === 'dashboard' ? "text-dominus-green" : "text-dominus-gray")}>
+          <button onClick={() => navigateToView('dashboard')} className={cn("p-2", view === 'dashboard' ? "text-dominus-green" : "text-dominus-gray")}>
             <LayoutDashboard size={20} />
           </button>
-          <button onClick={() => setView('settings')} className={cn("p-2", view === 'settings' ? "text-dominus-green" : "text-dominus-gray")}>
+          <button onClick={() => navigateToView('settings')} className={cn("p-2", view === 'settings' ? "text-dominus-green" : "text-dominus-gray")}>
             <SettingsIcon size={20} />
           </button>
           <button onClick={() => signOut(auth)} className="p-2 text-red-500 hover:text-red-400">
@@ -2249,7 +2336,7 @@ export default function App() {
                         key={item.id}
                         onClick={() => {
                           setCurrentAnalysis(item);
-                          setView('dashboard');
+                          navigateToView('dashboard');
                         }}
                         className="dominus-card p-6 hover:border-dominus-green/30 transition-all cursor-pointer group"
                       >
