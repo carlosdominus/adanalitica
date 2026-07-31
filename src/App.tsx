@@ -27,7 +27,8 @@ import {
   LogOut,
   Mic,
   FileAudio,
-  Volume2
+  Volume2,
+  Lock
 } from 'lucide-react';
 
 // Firebase imports
@@ -774,6 +775,12 @@ export default function App() {
   const [deletePasswordError, setDeletePasswordError] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // Settings Password Modal states
+  const [isSettingsUnlocked, setIsSettingsUnlocked] = useState(false);
+  const [showSettingsAuthModal, setShowSettingsAuthModal] = useState(false);
+  const [settingsPasswordInput, setSettingsPasswordInput] = useState('');
+  const [settingsPasswordError, setSettingsPasswordError] = useState<string | null>(null);
+
   // Monitor Auth state
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -846,12 +853,18 @@ export default function App() {
   useEffect(() => {
     const handleHashChange = () => {
       const hash = window.location.hash.toLowerCase().replace('#', '');
-      if (hash === 'historico' || hash === 'historico') {
+      if (hash === 'historico') {
         setView('history');
       } else if (hash === 'gerarresumo' || hash === 'dashboard' || hash === 'gerar-resumo') {
         setView('dashboard');
       } else if (hash === 'ajustes' || hash === 'settings') {
-        setView('settings');
+        if (isSettingsUnlocked) {
+          setView('settings');
+        } else {
+          setSettingsPasswordInput('');
+          setSettingsPasswordError(null);
+          setShowSettingsAuthModal(true);
+        }
       } else if (!hash) {
         // Default hash if empty
         window.history.replaceState(null, '', '#historico');
@@ -868,10 +881,16 @@ export default function App() {
       window.removeEventListener('popstate', handleHashChange);
       window.removeEventListener('hashchange', handleHashChange);
     };
-  }, []);
+  }, [isSettingsUnlocked]);
 
   // Update URL hash when view changes programmatically
   const navigateToView = (newView: View) => {
+    if (newView === 'settings' && !isSettingsUnlocked) {
+      setSettingsPasswordInput('');
+      setSettingsPasswordError(null);
+      setShowSettingsAuthModal(true);
+      return;
+    }
     setView(newView);
     let targetHash = '#historico';
     if (newView === 'dashboard') targetHash = '#gerarresumo';
@@ -1390,6 +1409,22 @@ export default function App() {
       setDeletePasswordError("Não foi possível excluir o item do histórico.");
     } finally {
       setIsDeleting(false);
+    }
+  };
+
+  const handleSettingsAuthSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (settingsPasswordInput.trim() !== "Configuracoes1213!") {
+      setSettingsPasswordError("Senha incorreta! Acesso negado às configurações.");
+      return;
+    }
+    setIsSettingsUnlocked(true);
+    setShowSettingsAuthModal(false);
+    setSettingsPasswordInput('');
+    setSettingsPasswordError(null);
+    setView('settings');
+    if (window.location.hash !== '#ajustes') {
+      window.history.pushState(null, '', '#ajustes');
     }
   };
 
@@ -2409,7 +2444,7 @@ export default function App() {
               </motion.div>
             )}
 
-            {view === 'settings' && (
+            {view === 'settings' && isSettingsUnlocked && (
               <motion.div 
                 key="settings"
                 initial={{ opacity: 0, y: 20 }}
@@ -2569,6 +2604,79 @@ export default function App() {
                     ) : (
                       <span>Confirmar Exclusão</span>
                     )}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Modal de senha para acesso às Configurações */}
+      <AnimatePresence>
+        {showSettingsAuthModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-[#111517] border border-[#1E272B] rounded-2xl p-6 sm:p-8 max-w-md w-full shadow-2xl relative"
+            >
+              <div className="flex items-center gap-3 text-dominus-green mb-4">
+                <div className="p-3 bg-dominus-green/10 rounded-xl">
+                  <Lock size={24} />
+                </div>
+                <div>
+                  <h3 className="font-display font-bold text-lg text-white">Acesso Restrito</h3>
+                  <p className="text-xs text-dominus-gray">Configurações da Plataforma</p>
+                </div>
+              </div>
+
+              <p className="text-sm text-dominus-gray mb-6 leading-relaxed">
+                Insira a senha de autorização para acessar as configurações da plataforma:
+              </p>
+
+              <form onSubmit={handleSettingsAuthSubmit} className="space-y-4">
+                <div>
+                  <input 
+                    type="password"
+                    autoFocus
+                    value={settingsPasswordInput}
+                    onChange={(e) => {
+                      setSettingsPasswordInput(e.target.value);
+                      setSettingsPasswordError(null);
+                    }}
+                    placeholder="Digite a senha de configurações"
+                    className="w-full bg-[#0B0F10] border border-[#1E272B] rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-dominus-green/50 transition-colors placeholder:text-dominus-gray/50"
+                  />
+                  {settingsPasswordError && (
+                    <p className="text-xs text-red-500 mt-2 flex items-center gap-1 font-semibold">
+                      <AlertCircle size={14} />
+                      {settingsPasswordError}
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-end gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowSettingsAuthModal(false);
+                      setSettingsPasswordInput('');
+                      setSettingsPasswordError(null);
+                      if (view === 'settings') {
+                        navigateToView('history');
+                      }
+                    }}
+                    className="px-5 py-2.5 rounded-full text-xs font-semibold text-dominus-gray hover:text-white hover:bg-white/5 transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-6 py-2.5 rounded-full text-xs font-bold bg-dominus-green hover:bg-dominus-green-hover text-black transition-all shadow-lg shadow-dominus-green/20 flex items-center gap-2 cursor-pointer"
+                  >
+                    <span>Acessar</span>
                   </button>
                 </div>
               </form>
